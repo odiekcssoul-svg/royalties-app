@@ -8,10 +8,10 @@ import { cn } from '../lib/utils'
 import { motion } from 'framer-motion'
 
 const navItems = [
-  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard'      },
-  { to: '/upload',     icon: Upload,          label: 'Subir Reporte'  },
-  { to: '/reports',    icon: FileText,        label: 'Mis Reportes'   },
-  { to: '/contracts',  icon: FileSignature,   label: 'Contratos'      },
+  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard'     },
+  { to: '/upload',     icon: Upload,          label: 'Subir Reporte' },
+  { to: '/reports',    icon: FileText,        label: 'Mis Reportes'  },
+  { to: '/contracts',  icon: FileSignature,   label: 'Contratos'     },
 ]
 
 export default function Layout() {
@@ -48,7 +48,7 @@ export default function Layout() {
               key={to}
               to={to}
               className={({ isActive }) => cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group',
+                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
                 isActive
                   ? 'bg-primary/10 text-primary'
                   : 'text-text-secondary hover:text-text-primary hover:bg-surface-2'

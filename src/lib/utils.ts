@@ -39,7 +39,7 @@ export function truncate(str: string, maxLen: number): string {
   return str.slice(0, maxLen) + '…'
 }
 
-/** Pay per 1000 streams (RPMY-style) */
+/** Pay per 1000 streams (RPM) */
 export function ratePerK(earnings: number, streams: number): number {
   if (!streams || streams === 0) return 0
   return (earnings / streams) * 1000

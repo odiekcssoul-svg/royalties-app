@@ -94,7 +94,8 @@ export default function ReportDetailPage() {
     enabled: !!user,
   })
 
-  const artists   = useMemo(() => [...new Set((records ?? []).map(r => r.artist_name))].sort(), [records])  const platforms = useMemo(() => [...new Set((records ?? []).map(r => r.store))].sort(), [records])
+  const artists   = useMemo(() => [...new Set((records ?? []).map(r => r.artist_name))].sort(), [records])
+  const platforms = useMemo(() => [...new Set((records ?? []).map(r => r.store))].sort(), [records])
   const songs     = useMemo(() => [...new Set((records ?? []).map(r => r.song_title))].sort(), [records])
   const countries = useMemo(() => [...new Set((records ?? []).map(r => r.country))].sort(), [records])
 
