@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border box-border;
+  }
+  body {
+    @apply bg-background text-text-primary font-sans antialiased m-0;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-surface;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-3 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-border-light;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-xl p-6;
+  }
+  .card-sm {
+    @apply bg-surface border border-border rounded-lg p-4;
+  }
+  .btn-primary {
+    @apply bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center;
+  }
+  .btn-secondary {
+    @apply bg-surface-2 hover:bg-surface-3 text-text-primary border border-border font-medium px-4 py-2 rounded-lg transition-all duration-200 inline-flex items-center justify-center;
+  }
+  .btn-ghost {
+    @apply hover:bg-surface-2 text-text-secondary hover:text-text-primary font-medium px-4 py-2 rounded-lg transition-all duration-200 inline-flex items-center justify-center;
+  }
+  .btn-danger {
+    @apply bg-error/10 hover:bg-error/20 text-error border border-error/20 font-medium px-4 py-2 rounded-lg transition-all duration-200 inline-flex items-center justify-center;
+  }
+  .input {
+    @apply bg-surface-2 border border-border text-text-primary placeholder-text-muted rounded-lg px-4 py-2.5 w-full focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-200;
+  }
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-success {
+    @apply badge bg-success/10 text-success;
+  }
+  .badge-warning {
+    @apply badge bg-warning/10 text-warning;
+  }
+  .badge-error {
+    @apply badge bg-error/10 text-error;
+  }
+  .badge-primary {
+    @apply badge bg-primary/10 text-primary;
+  }
+}

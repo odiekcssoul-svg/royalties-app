@@ -1,0 +1,119 @@
+export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
+
+export interface Database {
+  public: {
+    Tables: {
+      profiles: {
+        Row: {
+          id: string
+          email: string
+          full_name: string | null
+          role: 'admin' | 'user'
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          email: string
+          full_name?: string | null
+          role?: 'admin' | 'user'
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          email?: string
+          full_name?: string | null
+          role?: 'admin' | 'user'
+          is_active?: boolean
+          updated_at?: string
+        }
+      }
+      reports: {
+        Row: {
+          id: string
+          user_id: string
+          file_name: string
+          file_path: string
+          file_size: number
+          file_type: string
+          status: 'pending' | 'processing' | 'completed' | 'error'
+          error_message: string | null
+          created_at: string
+          processed_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          file_name: string
+          file_path: string
+          file_size: number
+          file_type: string
+          status?: 'pending' | 'processing' | 'completed' | 'error'
+          error_message?: string | null
+          created_at?: string
+          processed_at?: string | null
+        }
+        Update: {
+          status?: 'pending' | 'processing' | 'completed' | 'error'
+          error_message?: string | null
+          processed_at?: string | null
+        }
+      }
+      royalty_records: {
+        Row: {
+          id: string
+          report_id: string
+          user_id: string
+          sale_period: string
+          store: string
+          country: string
+          artist_name: string
+          song_title: string
+          album_name: string | null
+          quantity: number
+          earnings_usd: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          report_id: string
+          user_id: string
+          sale_period: string
+          store: string
+          country: string
+          artist_name: string
+          song_title: string
+          album_name?: string | null
+          quantity: number
+          earnings_usd: number
+          created_at?: string
+        }
+        Update: never
+      }
+      activity_logs: {
+        Row: {
+          id: string
+          user_id: string
+          action: string
+          details: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          action: string
+          details?: Json | null
+          created_at?: string
+        }
+        Update: never
+      }
+    }
+  }
+}
+
+export type Profile = Database['public']['Tables']['profiles']['Row']
+export type Report = Database['public']['Tables']['reports']['Row']
+export type RoyaltyRecord = Database['public']['Tables']['royalty_records']['Row']
+export type ActivityLog = Database['public']['Tables']['activity_logs']['Row']
