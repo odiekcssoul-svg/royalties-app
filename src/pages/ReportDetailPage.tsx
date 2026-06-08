@@ -1,14 +1,16 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, formatNumber, formatDate, ratePerK, ratePer100, formatRate } from '../lib/utils'
 import { exportSplitsExcel, exportConsolidatedExcel, exportSplitsPdf } from '../lib/splits-export'
+import { parseDistroKidFile, parseDistroKidFileWithSummary, detectFraudulentStreams } from '../lib/distrokid-parser'
+import type { FraudReport } from '../lib/distrokid-parser'
 import {
   ArrowLeft, Download, Loader2, DollarSign, TrendingUp, Globe,
   Music, Star, Radio, Users, ChevronDown, FileSpreadsheet,
-  FileText as FilePdf, FileType2, Zap, Percent
+  FileText as FilePdf, FileType2, Zap, Percent, ShieldAlert, ShieldCheck, ChevronUp
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -63,6 +65,11 @@ export default function ReportDetailPage() {
 
   // ui
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [fraudReport, setFraudReport]       = useState<FraudReport | null>(null)
+  const [fraudLoading, setFraudLoading]     = useState(false)
+  const [showFraudDetail, setShowFraudDetail] = useState(false)
+  const [repairing, setRepairing]           = useState(false)
+  const repairAttempted                     = useRef(false)
 
   const { data: report } = useQuery<Report>({
     queryKey: ['report', id],
@@ -74,15 +81,88 @@ export default function ReportDetailPage() {
     enabled: !!id && !!user,
   })
 
+  const queryClient = useQueryClient()
+
   const { data: records, isLoading } = useQuery<RoyaltyRecord[]>({
     queryKey: ['royalty-records', id],
     queryFn: async () => {
-      const { data, error } = await db.from('royalty_records').select('*').eq('report_id', id!).eq('user_id', user!.id)
-      if (error) throw error
-      return data as RoyaltyRecord[]
+      // Fetch all rows with pagination (Supabase default limit is 1000)
+      const PAGE = 1000
+      let all: RoyaltyRecord[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await db
+          .from('royalty_records')
+          .select('*')
+          .eq('report_id', id!)
+          .eq('user_id', user!.id)
+          .range(from, from + PAGE - 1)
+        if (error) throw error
+        all = all.concat(data as RoyaltyRecord[])
+        if (!data || data.length < PAGE) break
+        from += PAGE
+      }
+      return all
     },
     enabled: !!id && !!user,
   })
+
+  // ── Auto-repair: detect bad earnings (Royalty Basis instead of Collaborator Share) ──
+  // Downloads the original file, gets the official total, and compares with what's in DB.
+  // If they differ by more than 5%, re-parse and replace all records.
+  useEffect(() => {
+    if (!records || !report || repairing || repairAttempted.current) return
+    if (records.length < 10) return
+
+    repairAttempted.current = true
+
+    const checkAndRepair = async () => {
+      try {
+        const { data: fileData, error: dlErr } = await supabase.storage
+          .from('reports').download(report.file_path)
+        if (dlErr || !fileData) return
+
+        const file = new File([fileData], report.file_name)
+        const { rows, summary } = await parseDistroKidFileWithSummary(file)
+        if (rows.length === 0) return
+
+        const dbTotal    = records.reduce((s, r) => s + r.earnings_usd, 0)
+        const freshTotal = rows.reduce((s, r) => s + r.earnings_usd, 0)
+
+        // Use official total if available, otherwise use the fresh parse total
+        const referenceTotal = summary.officialReportTotal ?? freshTotal
+
+        // If DB total differs from reference by more than 5% → repair needed
+        const diffPct = referenceTotal > 0 ? Math.abs(dbTotal - referenceTotal) / referenceTotal : 0
+        if (diffPct <= 0.05) return  // data looks correct, skip repair
+
+        setRepairing(true)
+
+        // Delete old bad records
+        await db.from('royalty_records').delete().eq('report_id', id!).eq('user_id', user!.id)
+
+        // Re-insert correct records in batches
+        const BATCH = 500
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const batch = rows.slice(i, i + BATCH).map(r => ({
+            ...r,
+            report_id: id,
+            user_id: user!.id,
+          }))
+          await db.from('royalty_records').insert(batch)
+        }
+
+        // Refresh data
+        queryClient.invalidateQueries({ queryKey: ['royalty-records', id] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+      } catch {
+        // fail silently
+      } finally {
+        setRepairing(false)
+      }
+    }
+    checkAndRepair()
+  }, [records, report])
 
   const { data: contracts } = useQuery<Contract[]>({
     queryKey: ['contracts', user?.id],
@@ -95,6 +175,28 @@ export default function ReportDetailPage() {
   })
 
   const artists   = useMemo(() => [...new Set((records ?? []).map(r => r.artist_name))].sort(), [records])
+
+  // ── Fraud detection: download file from storage and analyse it ──
+  useEffect(() => {
+    if (!report?.file_path) return
+    let cancelled = false
+    const run = async () => {
+      setFraudLoading(true)
+      try {
+        const { data, error } = await supabase.storage.from('reports').download(report.file_path)
+        if (error || !data || cancelled) return
+        const file = new File([data], report.file_name)
+        const result = await detectFraudulentStreams(file)
+        if (!cancelled) setFraudReport(result)
+      } catch {
+        // silently fail — fraud panel just won't show
+      } finally {
+        if (!cancelled) setFraudLoading(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [report?.file_path, report?.file_name])
   const platforms = useMemo(() => [...new Set((records ?? []).map(r => r.store))].sort(), [records])
   const songs     = useMemo(() => [...new Set((records ?? []).map(r => r.song_title))].sort(), [records])
   const countries = useMemo(() => [...new Set((records ?? []).map(r => r.country))].sort(), [records])
@@ -307,6 +409,14 @@ export default function ReportDetailPage() {
     </div>
   )
 
+  if (repairing) return (
+    <div className="flex flex-col items-center justify-center py-32 gap-4">
+      <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      <p className="text-text-muted text-sm">Corrigiendo datos del reporte...</p>
+      <p className="text-text-muted text-xs opacity-60">Se detectó un mapeo incorrecto y se está reparando automáticamente.</p>
+    </div>
+  )
+
   return (
     <div className="p-8">
       {/* Header */}
@@ -495,6 +605,151 @@ export default function ReportDetailPage() {
           </motion.div>
         ))}
       </div>
+
+      {/* ── Fraud detection panel ──────────────────────────── */}
+      {fraudLoading && (
+        <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }}
+          className="card mb-6 flex items-center gap-3 text-text-muted text-sm">
+          <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+          Analizando streams fraudulentos...
+        </motion.div>
+      )}
+
+      {fraudReport && !fraudLoading && (
+        <motion.div initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} className="mb-6">
+          {/* Alert / OK banner */}
+          {fraudReport.fraudStreams === 0 ? (
+            <div className="card flex items-center gap-3 border-success/30 bg-success/5">
+              <div className="w-9 h-9 bg-success/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <ShieldCheck className="w-5 h-5 text-success" />
+              </div>
+              <div>
+                <p className="text-success font-semibold text-sm">Sin streams fraudulentos detectados</p>
+                <p className="text-text-muted text-xs">No se encontraron filas con "Fraudulent Streams" en este reporte.</p>
+              </div>
+            </div>
+          ) : (
+            <div className={`card border ${fraudReport.isAlert ? 'border-error/40 bg-error/5' : 'border-warning/40 bg-warning/5'}`}>
+              {/* Header */}
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${fraudReport.isAlert ? 'bg-error/10' : 'bg-warning/10'}`}>
+                    <ShieldAlert className={`w-5 h-5 ${fraudReport.isAlert ? 'text-error' : 'text-warning'}`} />
+                  </div>
+                  <div>
+                    <p className={`font-semibold text-sm ${fraudReport.isAlert ? 'text-error' : 'text-warning'}`}>
+                      {fraudReport.isAlert ? '⚠️ Alerta de fraude' : '⚠️ Streams fraudulentos detectados'}
+                    </p>
+                    <p className="text-text-muted text-xs">
+                      {fraudReport.fraudStreams.toLocaleString()} streams fraudulentos — {fraudReport.fraudPct.toFixed(2)}% del total
+                      {fraudReport.isAlert && ' · Supera el límite del 5%'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFraudDetail(v => !v)}
+                  className="btn-ghost p-1.5 text-text-muted flex items-center gap-1 text-xs">
+                  {showFraudDetail ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
+                  {showFraudDetail ? 'Ocultar' : 'Ver detalle'}
+                </button>
+              </div>
+
+              {/* Summary stats */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'Streams fraudulentos', value: fraudReport.fraudStreams.toLocaleString(), color: 'text-error' },
+                  { label: '% del total',           value: `${fraudReport.fraudPct.toFixed(2)}%`,   color: fraudReport.isAlert ? 'text-error' : 'text-warning' },
+                  { label: 'Canciones afectadas',   value: fraudReport.bySong.length.toString(),    color: 'text-text-primary' },
+                  { label: 'Países sospechosos',    value: fraudReport.byCountry.length.toString(), color: 'text-text-primary' },
+                ].map(s => (
+                  <div key={s.label} className="bg-surface-2 rounded-xl p-3">
+                    <p className="text-text-muted text-xs mb-1">{s.label}</p>
+                    <p className={`font-bold text-lg tabular-nums ${s.color}`}>{s.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Progress bar */}
+              <div className="mb-4">
+                <div className="flex justify-between text-xs text-text-muted mb-1">
+                  <span>Streams legítimos ({(100 - fraudReport.fraudPct).toFixed(1)}%)</span>
+                  <span>Fraudulentos ({fraudReport.fraudPct.toFixed(1)}%)</span>
+                </div>
+                <div className="h-2.5 bg-surface-3 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${fraudReport.isAlert ? 'bg-error' : 'bg-warning'}`}
+                    style={{ width: `${Math.min(fraudReport.fraudPct, 100)}%` }} />
+                </div>
+              </div>
+
+              {/* Detail tables */}
+              <AnimatePresence>
+                {showFraudDetail && (
+                  <motion.div initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }} exit={{ opacity:0, height:0 }} className="overflow-hidden">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-border">
+                      {/* By song */}
+                      <div>
+                        <p className="text-text-secondary text-xs font-semibold mb-2 flex items-center gap-1.5">
+                          <Music className="w-3.5 h-3.5" /> Canciones afectadas
+                        </p>
+                        <div className="space-y-1.5">
+                          {fraudReport.bySong.slice(0, 8).map(s => (
+                            <div key={s.name} className="flex items-center gap-2">
+                              <span className="text-text-secondary text-xs truncate flex-1" title={s.name}>{s.name}</span>
+                              <span className={`text-xs font-medium tabular-nums flex-shrink-0 ${fraudReport.isAlert ? 'text-error' : 'text-warning'}`}>
+                                {s.streams.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                          {fraudReport.bySong.length > 8 && (
+                            <p className="text-text-muted text-xs">+{fraudReport.bySong.length - 8} más</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* By country */}
+                      <div>
+                        <p className="text-text-secondary text-xs font-semibold mb-2 flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5" /> Países sospechosos
+                        </p>
+                        <div className="space-y-1.5">
+                          {fraudReport.byCountry.slice(0, 8).map(c => (
+                            <div key={c.name} className="flex items-center gap-2">
+                              <span className="text-text-secondary text-xs truncate flex-1">{c.name}</span>
+                              <span className={`text-xs font-medium tabular-nums flex-shrink-0 ${fraudReport.isAlert ? 'text-error' : 'text-warning'}`}>
+                                {c.streams.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                          {fraudReport.byCountry.length > 8 && (
+                            <p className="text-text-muted text-xs">+{fraudReport.byCountry.length - 8} más</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* By platform */}
+                      <div>
+                        <p className="text-text-secondary text-xs font-semibold mb-2 flex items-center gap-1.5">
+                          <Radio className="w-3.5 h-3.5" /> Plataformas
+                        </p>
+                        <div className="space-y-1.5">
+                          {fraudReport.byStore.slice(0, 8).map(s => (
+                            <div key={s.name} className="flex items-center gap-2">
+                              <span className="text-text-secondary text-xs truncate flex-1">{s.name}</span>
+                              <span className={`text-xs font-medium tabular-nums flex-shrink-0 ${fraudReport.isAlert ? 'text-error' : 'text-warning'}`}>
+                                {s.streams.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* GroupBy selector */}
       <div className="card mb-6">
