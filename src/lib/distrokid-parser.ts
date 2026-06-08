@@ -178,8 +178,8 @@ function findHeaderRow(rows: string[][]): number {
 // ============================================================
 // Map headers to column indices — exact match wins over partial
 // ============================================================
-function mapHeaders(headerRow: string[]): Record<keyof RoyaltyRow, number | undefined> {
-  const map: Partial<Record<keyof RoyaltyRow, number>> = {}
+function mapHeaders(headerRow: string[]): Record<keyof RoyaltyRow, number | undefined> & { _trackArtistIdx?: number } {
+  const map: Partial<Record<keyof RoyaltyRow, number>> & { _trackArtistIdx?: number } = {}
 
   // Pass 1: exact matches only
   headerRow.forEach((h, i) => {
@@ -211,7 +211,25 @@ function mapHeaders(headerRow: string[]): Record<keyof RoyaltyRow, number | unde
     }
   })
 
-  return map as Record<keyof RoyaltyRow, number | undefined>
+  // ── Label/distributor report detection ──────────────────────────────────────
+  // When both "Artist" and "Track Artists" columns exist, "Artist" typically
+  // contains the label/distributor name (not the real artist). In that case,
+  // store the "Track Artists" index separately so parseRow can prefer it.
+  let genericArtistIdx: number | undefined
+  let trackArtistIdx: number | undefined
+
+  headerRow.forEach((h, i) => {
+    const key = (h ?? '').toString().toLowerCase().trim()
+    if (key === 'artist') genericArtistIdx = i
+    if (key === 'track artists') trackArtistIdx = i
+  })
+
+  if (genericArtistIdx !== undefined && trackArtistIdx !== undefined) {
+    // Keep the "Artist" col index as a fallback but prefer "Track Artists"
+    map._trackArtistIdx = trackArtistIdx
+  }
+
+  return map as Record<keyof RoyaltyRow, number | undefined> & { _trackArtistIdx?: number }
 }
 
 // ============================================================
@@ -219,12 +237,23 @@ function mapHeaders(headerRow: string[]): Record<keyof RoyaltyRow, number | unde
 // ============================================================
 function parseRow(
   row: string[],
-  colMap: Record<keyof RoyaltyRow, number | undefined>
+  colMap: Record<keyof RoyaltyRow, number | undefined> & { _trackArtistIdx?: number }
 ): RoyaltyRow | null {
   const get = (field: keyof RoyaltyRow): string => {
     const idx = colMap[field]
     if (idx === undefined) return ''
     return (row[idx] ?? '').toString().trim()
+  }
+
+  // If the report has both "Artist" and "Track Artists" columns, prefer
+  // "Track Artists" — in label/distributor reports the "Artist" column
+  // holds the label name, not the actual artist.
+  const getArtist = (): string => {
+    if (colMap._trackArtistIdx !== undefined) {
+      const trackArtist = (row[colMap._trackArtistIdx] ?? '').toString().trim()
+      if (trackArtist) return trackArtist
+    }
+    return get('artist_name')
   }
 
   const rawEarnings = get('earnings_usd')
@@ -260,7 +289,7 @@ function parseRow(
     sale_period:  salePeriod,
     store:        get('store')        || 'Unknown',
     country:      expandCountryCode(rawCountry),
-    artist_name:  get('artist_name')  || 'Unknown',
+    artist_name:  getArtist()         || 'Unknown',
     song_title:   get('song_title')   || 'Unknown',
     album_name:   get('album_name')   || '',
     quantity:     isNaN(quantity)  ? 0 : quantity,
