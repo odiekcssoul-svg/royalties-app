@@ -123,6 +123,34 @@ export default function ReportDetailPage() {
 
   const groupedData = useMemo(() => aggregate(filtered, groupByField), [filtered, groupByField])
 
+  // For song view: top country and top platform per song
+  const songMeta = useMemo(() => {
+    if (groupBy !== 'song') return {}
+    const map: Record<string, { country: string; store: string }> = {}
+    ;(filtered).forEach(r => {
+      if (!map[r.song_title]) {
+        map[r.song_title] = { country: r.country, store: r.store }
+      }
+    })
+    // For each song pick the country and store with most streams
+    const countryMap: Record<string, Record<string, number>> = {}
+    const storeMap:   Record<string, Record<string, number>> = {}
+    filtered.forEach(r => {
+      if (!countryMap[r.song_title]) countryMap[r.song_title] = {}
+      if (!storeMap[r.song_title])   storeMap[r.song_title]   = {}
+      countryMap[r.song_title][r.country] = (countryMap[r.song_title][r.country] ?? 0) + r.quantity
+      storeMap[r.song_title][r.store]     = (storeMap[r.song_title][r.store]     ?? 0) + r.quantity
+    })
+    const result: Record<string, { country: string; store: string }> = {}
+    Object.keys(countryMap).forEach(song => {
+      result[song] = {
+        country: Object.entries(countryMap[song]).sort((a,b) => b[1]-a[1])[0]?.[0] ?? '—',
+        store:   Object.entries(storeMap[song]).sort((a,b) => b[1]-a[1])[0]?.[0] ?? '—',
+      }
+    })
+    return result
+  }, [filtered, groupBy])
+
   const byPlatform = useMemo(() => aggregate(filtered, 'store'),      [filtered])
   const byCountry  = useMemo(() => aggregate(filtered, 'country'),    [filtered])
   const bySong     = useMemo(() => aggregate(filtered, 'song_title'), [filtered])
@@ -499,6 +527,10 @@ export default function ReportDetailPage() {
                   {groupBy === 'song' ? 'Canción' : groupBy === 'artist' ? 'Artista' :
                    groupBy === 'album' ? 'Álbum' : groupBy === 'store' ? 'Plataforma' : 'País'}
                 </th>
+                {groupBy === 'song' && <>
+                  <th className="text-left py-2 px-3 text-text-muted font-medium text-xs">País</th>
+                  <th className="text-left py-2 px-3 text-text-muted font-medium text-xs">Plataforma</th>
+                </>}
                 <th className="text-right py-2 px-3 text-text-muted font-medium text-xs">🎧 Streams</th>
                 <th className="text-right py-2 px-3 text-text-muted font-medium text-xs">💰 Regalías</th>
                 <th className="text-right py-2 px-3 text-text-muted font-medium text-xs">📈 $/100</th>
@@ -517,6 +549,10 @@ export default function ReportDetailPage() {
                         <span className="text-text-primary truncate max-w-[200px]" title={row.name}>{row.name}</span>
                       </div>
                     </td>
+                    {groupBy === 'song' && <>
+                      <td className="py-2.5 px-3 text-text-secondary text-xs">{songMeta[row.name]?.country ?? '—'}</td>
+                      <td className="py-2.5 px-3 text-text-secondary text-xs truncate max-w-[120px]">{songMeta[row.name]?.store ?? '—'}</td>
+                    </>}
                     <td className="text-right py-2.5 px-3 text-text-secondary tabular-nums">{formatNumber(row.streams)}</td>
                     <td className="text-right py-2.5 px-3 text-text-primary font-medium tabular-nums">{formatCurrency(row.earnings)}</td>
                     <td className="text-right py-2.5 px-3 text-accent tabular-nums text-xs">{formatRate(row.rate100)}</td>

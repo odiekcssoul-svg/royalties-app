@@ -139,9 +139,9 @@ export function exportSplitsPdf(
   autoTable(doc, {
     startY: 74,
     body: [
-      ['💰 Ingresos brutos',       formatCurrency(gross)],
-      ['🎧 Total streams',         formatNumber(streams)],
-      ['📈 RPM ($/1,000 streams)', `$${ratePerK(gross, streams).toFixed(4)}`],
+      ['Ingresos brutos',       formatCurrency(gross)],
+      ['Total streams',         formatNumber(streams)],
+      ['RPM ($/1,000 streams)', `$${ratePerK(gross, streams).toFixed(4)}`],
     ],
     styles: { fontSize: 10 },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 65 }, 1: { cellWidth: 80 } },
